@@ -6,21 +6,20 @@ namespace PitchDetect
     {
         public int MinFrequency { get; set; } = 30;
         public float Threshold { get; set; } = 0.5f;
-        public int SampleRate { get; private set; }
-        public ReadOnlySpan<double> Spectrum { get { return spectrum; } }
+        public uint SampleRate { get; private set; }
         public ReadOnlySpan<Complex> Correlation { get { return complexData; } }
 
         Complex[] complexData = null;
-        double[] spectrum = null;
         FftFlat.FastFourierTransform fft = null;
+        uint windowSize;
 
-        public PitchDetector(int sampleRate, int windowSize)
+        public PitchDetector(uint sampleRate, uint windowSize, bool zeroPad)
         {
             this.SampleRate = sampleRate;
+            this.windowSize = windowSize;
 
-            complexData = new Complex[windowSize * 2];
-            spectrum = new double[windowSize];
-            fft = new(windowSize * 2);
+            complexData = new Complex[zeroPad ? windowSize * 2 : windowSize];
+            fft = new(complexData.Length);
         }
 
         public float GetPitch(ReadOnlySpan<float> audioData)
@@ -37,20 +36,35 @@ namespace PitchDetect
 
             AutoCorrelate(complexData);
 
-            return GetPitch(complexData, spectrum, MinFrequency, Threshold);
+            return GetPitch(complexData, MinFrequency, Threshold);
+        }
+
+        static double HannWindow(int n, int frameSize)
+        {
+            return 0.5 * (1 - Math.Cos((2 * Math.PI * n) / (frameSize - 1)));
+        }
+
+        public void GetSpectrum(ReadOnlySpan<float> audioData, float[] spectrum)
+        {
+            for (int i = 0; i < audioData.Length; i++)
+            {
+                complexData[i] = new Complex(audioData[i] * HannWindow(i, (int)windowSize), 0);
+            }
+
+            fft.Forward(new Span<Complex>(complexData, 0, audioData.Length));
+
+            for (int i = 0; i < audioData.Length / 2; i++)
+            {
+                double fft = Math.Abs(complexData[i].Real + complexData[i].Imaginary);
+                double fftMirror = Math.Abs(complexData[complexData.Length - i - 1].Real + complexData[complexData.Length - i - 1].Imaginary);
+
+                spectrum[i] = (float)((fft + fftMirror) * (0.5 + (i / (complexData.Length * 2))));
+            }
         }
 
         void AutoCorrelate(Span<Complex> data)
         {
-            fft.Forward(data);
-
-            for (int i = 0; i < data.Length / 2; i++)
-            {
-                double fft = Math.Abs(data[i].Real + data[i].Imaginary);
-                double fftMirror = Math.Abs(data[data.Length - i - 1].Real + data[data.Length - i - 1].Imaginary);
-
-                spectrum[i] = (fft + fftMirror) * (0.5 + (i / (data.Length * 2)));
-            }
+            fft.Forward(complexData);
 
             for (int i = 0; i < data.Length; i++)
             {
@@ -60,38 +74,38 @@ namespace PitchDetect
             fft.Inverse(data);
         }
 
-        float Interpolate(float floatBin, params int[] bins)
-        {
-            double result = 0; // Initialize result
+        //float Interpolate(float floatBin, params int[] bins)
+        //{
+        //    double result = 0; // Initialize result
 
-            for (int i = 0; i < bins.Length; i++)
-            {
-                // Compute individual terms
-                // of above formula
-                double term = spectrum[bins[i]];
+        //    for (int i = 0; i < bins.Length; i++)
+        //    {
+        //        // Compute individual terms
+        //        // of above formula
+        //        double term = spectrum[bins[i]];
 
-                for (int j = 0; j < bins.Length; j++)
-                {
-                    if (j != i)
-                        term = term * (floatBin - bins[j]) /
-                                  (double)(bins[i] - bins[j]);
-                }
+        //        for (int j = 0; j < bins.Length; j++)
+        //        {
+        //            if (j != i)
+        //                term = term * (floatBin - bins[j]) /
+        //                          (double)(bins[i] - bins[j]);
+        //        }
 
-                // Add current term to result
-                result += term;
-            }
+        //        // Add current term to result
+        //        result += term;
+        //    }
 
-            return (float)result;
-        }
+        //    return (float)result;
+        //}
 
-        public float GetEnergy(float frequency)
-        {
-            float bin = ((frequency * (spectrum.Length * 2)) / SampleRate);
+        //public float GetEnergy(float frequency)
+        //{
+        //    float bin = ((frequency * (spectrum.Length * 2)) / SampleRate);
 
-            int intBin = (int)bin;
+        //    int intBin = (int)bin;
 
-            return Interpolate(bin, intBin - 1, intBin, intBin + 1);
-        }
+        //    return Interpolate(bin, intBin - 1, intBin, intBin + 1);
+        //}
 
         public float GetGoertzelPower(ReadOnlySpan<float> audioData, float freq)
         {
@@ -117,25 +131,25 @@ namespace PitchDetect
         }
 
 
-        float GetHarmonicEnergy(float baseFreq)
-        {
-            //float freq = baseFreq * 3;
+        //float GetHarmonicEnergy(float baseFreq)
+        //{
+        //    //float freq = baseFreq * 3;
 
-            //int bin = (int)((freq * (spectrum.Length * 2)) / SampleRate);
+        //    //int bin = (int)((freq * (spectrum.Length * 2)) / SampleRate);
 
-            //return (float)spectrum[bin];
+        //    //return (float)spectrum[bin];
 
-            float totEnergy = 0;
+        //    float totEnergy = 0;
 
-            for (int harmonic = 0; harmonic < 5; harmonic++)
-            {
-                float freq = baseFreq * (1 + harmonic);
+        //    for (int harmonic = 0; harmonic < 5; harmonic++)
+        //    {
+        //        float freq = baseFreq * (1 + harmonic);
 
-                totEnergy += GetEnergy(freq);
-            }
+        //        totEnergy += GetEnergy(freq);
+        //    }
 
-            return totEnergy;
-        }
+        //    return totEnergy;
+        //}
 
 
         List<(float Freq, float Corr)> GetPeaks(ReadOnlySpan<Complex> corr, int maxBin, float threshold)
@@ -187,7 +201,7 @@ namespace PitchDetect
             return peaks;
         }
 
-        float GetPitch(ReadOnlySpan<Complex> corr, ReadOnlySpan<double> spectrum, float minFreq, float threshold)
+        float GetPitch(ReadOnlySpan<Complex> corr, float minFreq, float threshold)
         {
             int endBin = Math.Min((int)(SampleRate / minFreq), corr.Length);
 
