@@ -39,9 +39,23 @@ namespace PitchDetect
             return GetPitch(complexData, MinFrequency, Threshold);
         }
 
-        static double HannWindow(int n, int frameSize)
+        public static double HannWindow(int n, int frameSize)
         {
             return 0.5 * (1 - Math.Cos((2 * Math.PI * n) / (frameSize - 1)));
+        }
+
+        public static float GetSpectralFlux(ReadOnlySpan<float> spectrum1, ReadOnlySpan<float> spectrum2)
+        {
+            float tot = 0;
+
+            for (int i = 0; i < spectrum1.Length; i++)
+            {
+                float diff = spectrum1[i] - spectrum2[i];
+
+                tot += diff * diff;
+            }
+
+            return tot / spectrum1.Length;
         }
 
         public void GetSpectrum(ReadOnlySpan<float> audioData, float[] spectrum)
