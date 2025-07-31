@@ -12,6 +12,7 @@ namespace PitchDetect
         Complex[] complexData = null;
         FftFlat.FastFourierTransform fft = null;
         uint windowSize;
+        (float Freq, float Corr)[] peaks = new (float Freq, float Corr)[16];
 
         public PitchDetector(uint sampleRate, uint windowSize, bool zeroPad)
         {
@@ -166,13 +167,13 @@ namespace PitchDetect
         //}
 
 
-        List<(float Freq, float Corr)> GetPeaks(ReadOnlySpan<Complex> corr, int maxBin, float threshold)
+        int GetPeaks(ReadOnlySpan<Complex> corr, int maxBin, float threshold, (float Freq, float Corr)[] results)
         {
-            List<(float Freq, float Corr)> peaks = new();
-
             bool haveNegative = false;
             bool isIncreasing = false;
             double lastValue = double.MaxValue;
+
+            int resultPos = 0;
 
             for (int i = 1; i <= maxBin; i++)
             {
@@ -195,7 +196,12 @@ namespace PitchDetect
                             float freq = 1.0f / ((float)(i - 1) / (float)SampleRate);
                             float peakCorr = (float)corr[i - 1].Real;
 
-                            peaks.Add((freq, peakCorr));
+                            results[resultPos] = (freq, peakCorr);
+
+                            resultPos++;
+
+                            if (resultPos == results.Length)
+                                return resultPos;
                         }
 
                         isIncreasing = false;
@@ -212,19 +218,16 @@ namespace PitchDetect
                 lastValue = corr[i].Real;
             }
 
-            return peaks;
+            return resultPos;
         }
 
         float GetPitch(ReadOnlySpan<Complex> corr, float minFreq, float threshold)
         {
             int endBin = Math.Min((int)(SampleRate / minFreq), corr.Length);
 
-            var peaks = GetPeaks(corr, endBin, threshold);
+            Array.Clear(peaks);
 
-            if (peaks.Count == 0)
-            {
-                return 0;
-            }
+            int numPeaks = GetPeaks(corr, endBin, threshold, peaks);
 
             float maxPeak = peaks.Select(p => p.Corr).Max();
 
@@ -259,7 +262,7 @@ namespace PitchDetect
             //    return (float)SampleRate / (float)peaks[max];
             //}
 
-            if (peaks.Any())
+            if (numPeaks > 0)
                 return peaks.Where(p => p.Corr > (maxPeak * 0.25f)).FirstOrDefault().Freq;
 
             return 0;
