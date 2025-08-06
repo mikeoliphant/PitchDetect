@@ -7,78 +7,109 @@ using System.Threading.Tasks;
 
 namespace PitchDetect
 {
-    public class OnsetDetector
+    public class EnvelopeFollower
     {
-        public float AbsoluteThreshold { get; set; } = 0.01f;
-        public float RelativeThreshold { get; set; } = 0.5f;
-        public int ResetSamples { get; set; } = 4096;
-        public float CurrentMax { get { return env; } }
+        float attackCoefficient;
+        float releaseCoefficient;
+        float env = 0;
 
-        float currentRunningPeak = 0;
-        int resetSamplesSoFar = 0;
-        float env;
-        float releaseCoefficient = MathF.Exp(-1.0f / (35 * 0.001f * 48000f));
-        float lastEnv;
-
-        public OnsetDetector()
+        public EnvelopeFollower(float attackMS, float releaseMS, int sampleRate)
         {
-
+            attackCoefficient = MathF.Exp(-1.0f / (attackMS * 0.001f * (float)sampleRate));
+            releaseCoefficient = MathF.Exp(-1.0f / (releaseMS * 0.001f * (float)sampleRate));
         }
 
         public void Reset()
         {
-            env = lastEnv = 0;
-            currentRunningPeak = 0;
+            env = 0;
         }
 
-        public bool Detect(ReadOnlySpan<float> audioData)
+        public void SetValue(float absValue)
         {
+            env = absValue;
+        }
+
+        public float Advance(float absValue)
+        {
+            if (absValue > env)
+                env = attackCoefficient * (env - absValue) + absValue;
+            else
+                env = releaseCoefficient * (env - absValue) + absValue;
+
+            return env;
+        }
+    }
+
+    public class OnsetDetector
+    {
+        public float AbsoluteThreshold { get; set; } = 0.05f;
+        public float RelativeThreshold { get; set; } = 0.4f;
+        public int ResetSamples { get; set; } = 4096;
+        public float CurrentMax { get { return env; } }
+
+        int resetSamplesSoFar = 0;
+        EnvelopeFollower fastFollower;
+        EnvelopeFollower slowFollower;
+        float env = 0;
+        public float envSlow = 0;
+
+        public OnsetDetector(int sampleRate)
+        {
+            fastFollower = new(0, 35, sampleRate);
+            slowFollower = new(5, 100, sampleRate);
+        }
+
+        public void Reset()
+        {
+            fastFollower.Reset();
+            slowFollower.Reset();
+        }
+
+        public bool? Detect(ReadOnlySpan<float> audioData)
+        {
+            float abs = 0;
+
+            bool? detect = null;
+
             for (int pos = 0; pos < audioData.Length ; pos++)
             {
-                float abs = MathF.Abs(audioData[pos]);
+                abs = MathF.Abs(audioData[pos]);
 
-                if (abs > env)
-                    env = abs;
-                else
-                    env = releaseCoefficient * (env - abs) + abs;
-            }
+                env = fastFollower.Advance(abs);
+                envSlow = slowFollower.Advance(abs);
 
-            bool detect = false;
-
-            if (resetSamplesSoFar > 0)
-            {
-                resetSamplesSoFar -= audioData.Length;
-                currentRunningPeak = env;
-            }
-            else
-            {
-                if (env > lastEnv)
+                if (resetSamplesSoFar > 0)
                 {
-                    float delta = (env - currentRunningPeak);
+                    resetSamplesSoFar--;
+                }
+                else if (!detect.HasValue)
+                {
+                    float delta = env - envSlow;
 
-                    if (delta > AbsoluteThreshold)
+                    if (delta > 0)
                     {
-                        detect = (delta / env) > RelativeThreshold;
-
-                        if (detect)
+                        if ((env > AbsoluteThreshold) && ((delta / env) > RelativeThreshold))
                         {
-                            currentRunningPeak = env;
+                            detect = true;
 
                             resetSamplesSoFar = ResetSamples;
                         }
                     }
-                }
-                else
-                {
-                    currentRunningPeak = env;
+                    else
+                    {
+                        if ((-delta / env) > RelativeThreshold)
+                            detect = false;
+                    }
+
+                    if (detect.HasValue)
+                    {
+                        slowFollower.SetValue(env);
+                    }
                 }
             }
-
-            lastEnv = env;
 
             return detect;
         }
     }
-
 
 }

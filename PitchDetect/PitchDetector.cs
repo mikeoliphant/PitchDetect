@@ -6,15 +6,15 @@ namespace PitchDetect
     {
         public int MinFrequency { get; set; } = 30;
         public float Threshold { get; set; } = 0.5f;
-        public uint SampleRate { get; private set; }
+        public int SampleRate { get; private set; }
         public ReadOnlySpan<Complex> Correlation { get { return complexData; } }
 
         Complex[] complexData = null;
         FftFlat.FastFourierTransform fft = null;
-        uint windowSize;
+        int windowSize;
         (float Freq, float Corr)[] peaks = new (float Freq, float Corr)[16];
 
-        public PitchDetector(uint sampleRate, uint windowSize, bool zeroPad)
+        public PitchDetector(int sampleRate, int windowSize, bool zeroPad)
         {
             this.SampleRate = sampleRate;
             this.windowSize = windowSize;
