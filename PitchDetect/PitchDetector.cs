@@ -166,6 +166,16 @@ namespace PitchDetect
         //    return totEnergy;
         //}
 
+        (double Bin, double Corr) GetInterpolatedPeak(double pPrev, double p, double pNext)
+        {
+            double den = pPrev + pNext - (2 * p); // array[x_adjusted + 1] + array[x_adjusted - 1] - 2 * array[x_adjusted];
+            double delta = pPrev - pNext; // array[x_adjusted - 1] - array[x_adjusted + 1];
+
+            if (den == 0)
+                return (0, p);
+
+            return (delta / (2 * den), p - delta * delta / (8 * den));
+        }
 
         int GetPeaks(ReadOnlySpan<Complex> corr, int maxBin, float threshold, (float Freq, float Corr)[] results)
         {
@@ -193,10 +203,13 @@ namespace PitchDetect
                     {
                         if (corr[i].Real > threshold)
                         {
-                            float freq = 1.0f / ((float)(i - 1) / (float)SampleRate);
-                            float peakCorr = (float)corr[i - 1].Real;
+                            int bin = i - 1;
 
-                            results[resultPos] = (freq, peakCorr);
+                            var iDelta = GetInterpolatedPeak(corr[bin - 1].Real, corr[bin].Real, corr[bin + 1].Real);
+
+                            float freq = 1.0f / (((float)bin + (float)iDelta.Bin) / (float)SampleRate);
+
+                            results[resultPos] = (freq, (float)iDelta.Corr);
 
                             resultPos++;
 
@@ -261,7 +274,7 @@ namespace PitchDetect
             //{
             //    return (float)SampleRate / (float)peaks[max];
             //}
-
+         
             if (numPeaks > 0)
                 return peaks.Where(p => p.Corr > (maxPeak * 0.25f)).FirstOrDefault().Freq;
 
