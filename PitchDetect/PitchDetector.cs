@@ -40,6 +40,27 @@ namespace PitchDetect
             return GetPitch(complexData, MinFrequency, Threshold);
         }
 
+        public int GetPitchPeaks(ReadOnlySpan<float> audioData, (float Freq, float Corr)[] results)
+        {
+            for (int i = 0; i < audioData.Length; i++)
+            {
+                complexData[i] = new Complex(audioData[i], 0);
+            }
+
+            for (int i = audioData.Length; i < complexData.Length; i++)
+            {
+                complexData[i] = 0;
+            }
+
+            AutoCorrelate(complexData);
+
+            int endBin = Math.Min((int)(SampleRate / MinFrequency), complexData.Length);
+
+            Array.Clear(results);
+
+            return GetPeaks(complexData, endBin, Threshold, results);
+        }
+
         public static double HannWindow(int n, int frameSize)
         {
             return 0.5 * (1 - Math.Cos((2 * Math.PI * n) / (frameSize - 1)));
